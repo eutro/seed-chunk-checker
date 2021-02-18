@@ -18,34 +18,24 @@ import net.minecraft.util.registry.Registry;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.IdentityHashMap;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.ToIntFunction;
 
 public class SeedChunkChecker {
 
-    private static MethodHandle SHUTDOWN_HOOKS;
     private static final MethodHandle THREAD_TARGET;
     private static final MethodHandle APH_PROPERTIES;
     private static MethodHandle CLOSURE_FIELD;
 
     static {
         MethodHandles.Lookup lookup = MethodHandles.lookup();
-        try {
-            Field hooks = Class.forName("java.lang.ApplicationShutdownHooks").getDeclaredField("hooks");
-            hooks.setAccessible(true);
-            SHUTDOWN_HOOKS = lookup.unreflectGetter(hooks);
-        } catch (ReflectiveOperationException ignored) {
-        }
         try {
             Field target = Thread.class.getDeclaredField("target");
             target.setAccessible(true);
@@ -90,7 +80,6 @@ public class SeedChunkChecker {
             e.printStackTrace();
         }
         server.stop(true);
-        tryRemoveShutdownHooks();
     }
 
     private static JsonObject checkChunk(ServerWorld world, int x, int y) {
@@ -150,15 +139,6 @@ public class SeedChunkChecker {
             return (MinecraftServer) ((AtomicReference<?>) CLOSURE_FIELD.invoke(runnable)).get();
         } catch (Throwable e) {
             throw new IllegalStateException("Couldn't get running server", e);
-        }
-    }
-
-    private static void tryRemoveShutdownHooks() {
-        if (SHUTDOWN_HOOKS == null) return;
-        try {
-            IdentityHashMap<?, ?> hooks = (IdentityHashMap<?, ?>) SHUTDOWN_HOOKS.invokeExact();
-            hooks.entrySet().removeIf(entry -> "Server Shutdown Thread".equals(((Thread) entry.getKey()).getName()));
-        } catch (Throwable ignored) {
         }
     }
 }
