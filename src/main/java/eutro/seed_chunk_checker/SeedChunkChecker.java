@@ -29,14 +29,15 @@ import java.util.function.ToIntFunction;
 
 public class SeedChunkChecker {
     public static void main(String[] args) {
+        String seed = args[0];
         int x = Integer.parseInt(args[1]);
         int y = Integer.parseInt(args[2]);
-        File file = new File(args[0]);
+        File file = new File(seed);
         if (!file.mkdir()) {
-            System.err.printf("Directory %s already exists (seed may have already been checked)%n", args[0]);
+            System.err.printf("Directory %s already exists (seed may have already been checked)%n", seed);
         }
-        setSeed(args[0], file);
-        try (MinecraftServer server = startDedicatedServer("--nogui", "--universe", args[0])) {
+        setSeed(seed);
+        try (MinecraftServer server = startDedicatedServer("--nogui", "--world", seed)) {
             ServerWorld world;
             while ((world = server.getWorld(World.OVERWORLD)) == null) {
                 //noinspection BusyWait - cry about it
@@ -74,8 +75,8 @@ public class SeedChunkChecker {
         return obj;
     }
 
-    private static void setSeed(String seed, File file) {
-        ServerPropertiesLoader properties = new ServerPropertiesLoader(new File(file, "server.properties").toPath());
+    private static void setSeed(String seed) {
+        ServerPropertiesLoader properties = new ServerPropertiesLoader(new File("server.properties").toPath());
         Properties props;
         try {
             Field propertiesField = AbstractPropertiesHandler.class.getDeclaredField("properties");
