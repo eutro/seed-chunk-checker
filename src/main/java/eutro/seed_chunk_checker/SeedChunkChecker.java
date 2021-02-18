@@ -40,7 +40,13 @@ public class SeedChunkChecker {
             Field target = Thread.class.getDeclaredField("target");
             target.setAccessible(true);
             THREAD_TARGET = lookup.unreflectGetter(target);
-            Field properties = AbstractPropertiesHandler.class.getDeclaredField("properties");
+            Field properties;
+            try {
+                properties = AbstractPropertiesHandler.class.getDeclaredField("properties");
+            } catch (NoSuchFieldException ignored) {
+                //noinspection JavaReflectionMemberAccess
+                properties = AbstractPropertiesHandler.class.getDeclaredField("field_16848");
+            }
             properties.setAccessible(true);
             APH_PROPERTIES = lookup.unreflectGetter(properties);
         } catch (ReflectiveOperationException e) {
@@ -53,8 +59,9 @@ public class SeedChunkChecker {
         int x = Integer.parseInt(args[1]);
         int y = Integer.parseInt(args[2]);
         File file = new File(seed);
+        PrintStream err = System.err;
         if (!file.mkdir()) {
-            System.err.printf("Directory %s already exists (seed may have already been checked)%n", seed);
+            err.printf("Directory %s already exists (seed may have already been checked)%n", seed);
         }
         setSeed(seed);
         MinecraftServer server = startDedicatedServer("--nogui", "--world", seed);
@@ -66,18 +73,20 @@ public class SeedChunkChecker {
             } catch (InterruptedException ignored) {
             }
         }
+        File outFile = new File(file, "frequency.json");
         try {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             JsonObject obj = new JsonObject();
             obj.addProperty("x", x);
             obj.addProperty("y", y);
             obj.add("frequencies", checkChunk(world, x, y));
-            try (JsonWriter writer = gson.newJsonWriter(new FileWriter(new File(file, "frequency.json")))) {
+            try (JsonWriter writer = gson.newJsonWriter(new FileWriter(outFile))) {
                 gson.toJson(obj, writer);
             }
+            err.println("Saved to " + outFile);
         } catch (IOException e) {
-            System.err.println("Failed to save frequency.json");
-            e.printStackTrace();
+            err.println("Failed to save " + outFile);
+            e.printStackTrace(err);
         }
         server.stop(true);
     }
