@@ -21,14 +21,43 @@ import net.minecraft.world.chunk.WorldChunk;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.ToIntFunction;
 
 public class SeedChunkChecker {
+
+    private static MethodHandle SHUTDOWN_HOOKS;
+    private static final MethodHandle THREAD_TARGET;
+    private static final MethodHandle APH_PROPERTIES;
+    private static MethodHandle CLOSURE_FIELD;
+
+    static {
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        try {
+            Field hooks = Class.forName("java.lang.ApplicationShutdownHooks").getDeclaredField("hooks");
+            hooks.setAccessible(true);
+            SHUTDOWN_HOOKS = lookup.unreflectGetter(hooks);
+        } catch (ReflectiveOperationException ignored) {
+        }
+        try {
+            Field target = Thread.class.getDeclaredField("target");
+            target.setAccessible(true);
+            THREAD_TARGET = lookup.unreflectGetter(target);
+            Field properties = AbstractPropertiesHandler.class.getDeclaredField("properties");
+            properties.setAccessible(true);
+            APH_PROPERTIES = lookup.unreflectGetter(properties);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static void main(String[] args) {
         String seed = args[0];
         int x = Integer.parseInt(args[1]);
@@ -61,6 +90,7 @@ public class SeedChunkChecker {
             e.printStackTrace();
         }
         server.stop(true);
+        tryRemoveShutdownHooks();
     }
 
     private static JsonObject checkChunk(ServerWorld world, int x, int y) {
@@ -86,11 +116,9 @@ public class SeedChunkChecker {
         ServerPropertiesLoader properties = new ServerPropertiesLoader(new File("server.properties").toPath());
         Properties props;
         try {
-            Field propertiesField = AbstractPropertiesHandler.class.getDeclaredField("properties");
-            propertiesField.setAccessible(true);
-            props = (Properties) propertiesField.get(properties.getPropertiesHandler());
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException(e);
+            props = (Properties) APH_PROPERTIES.invokeExact((AbstractPropertiesHandler<?>) properties.getPropertiesHandler());
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
         }
         props.setProperty("level-seed", seed);
         properties.store();
@@ -110,17 +138,27 @@ public class SeedChunkChecker {
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Couldn't find server thread"));
         try {
-            Field target = Thread.class.getDeclaredField("target");
-            target.setAccessible(true);
-            Runnable runnable = (Runnable) target.get(serverThread);
-            Field closureField = Arrays.stream(runnable.getClass().getDeclaredFields())
-                    .filter(field -> AtomicReference.class.isAssignableFrom(field.getType()))
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException("Couldn't find server field"));
-            closureField.setAccessible(true);
-            return (MinecraftServer) ((AtomicReference<?>) closureField.get(runnable)).get();
-        } catch (ReflectiveOperationException e) {
+            Runnable runnable = (Runnable) THREAD_TARGET.invokeExact(serverThread);
+            if (CLOSURE_FIELD == null) {
+                Field closureField = Arrays.stream(runnable.getClass().getDeclaredFields())
+                        .filter(field -> AtomicReference.class.isAssignableFrom(field.getType()))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalStateException("Couldn't find server field"));
+                closureField.setAccessible(true);
+                CLOSURE_FIELD = MethodHandles.lookup().unreflectGetter(closureField);
+            }
+            return (MinecraftServer) ((AtomicReference<?>) CLOSURE_FIELD.invoke(runnable)).get();
+        } catch (Throwable e) {
             throw new IllegalStateException("Couldn't get running server", e);
+        }
+    }
+
+    private static void tryRemoveShutdownHooks() {
+        if (SHUTDOWN_HOOKS == null) return;
+        try {
+            IdentityHashMap<?, ?> hooks = (IdentityHashMap<?, ?>) SHUTDOWN_HOOKS.invokeExact();
+            hooks.entrySet().removeIf(entry -> "Server Shutdown Thread".equals(((Thread) entry.getKey()).getName()));
+        } catch (Throwable ignored) {
         }
     }
 }
