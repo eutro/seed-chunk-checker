@@ -20,6 +20,7 @@ import net.minecraft.world.chunk.WorldChunk;
 
 import java.io.File;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -37,12 +38,16 @@ public class SeedChunkChecker {
             System.err.printf("Directory %s already exists (seed may have already been checked)%n", seed);
         }
         setSeed(seed);
-        try (MinecraftServer server = startDedicatedServer("--nogui", "--world", seed)) {
-            ServerWorld world;
-            while ((world = server.getWorld(World.OVERWORLD)) == null) {
+        MinecraftServer server = startDedicatedServer("--nogui", "--world", seed);
+        ServerWorld world;
+        while ((world = server.getWorld(World.OVERWORLD)) == null) {
+            try {
                 //noinspection BusyWait - cry about it
                 Thread.sleep(0);
+            } catch (InterruptedException ignored) {
             }
+        }
+        try {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             JsonObject obj = new JsonObject();
             obj.addProperty("x", x);
@@ -51,9 +56,11 @@ public class SeedChunkChecker {
             try (JsonWriter writer = gson.newJsonWriter(new FileWriter(new File(file, "frequency.json")))) {
                 gson.toJson(obj, writer);
             }
-        } catch (Exception ignored) {
+        } catch (IOException e) {
+            System.err.println("Failed to save frequency.json");
+            e.printStackTrace();
         }
-        System.exit(0);
+        server.stop(true);
     }
 
     private static JsonObject checkChunk(ServerWorld world, int x, int y) {
